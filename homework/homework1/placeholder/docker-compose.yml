@@ -1,0 +1,9 @@
+version: '3.9'
+services:
+  sqlite:
+    image: nouchka/sqlite3
+    container_name: sqlite-container
+    volumes:
+      - /Users/aldno/CLionProjects/CMU15-445/homework/homework1/placeholder:/db
+    stdin_open: true
+    tty: true
