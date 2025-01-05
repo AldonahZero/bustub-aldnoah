@@ -1,75 +1,43 @@
-<img src="logo/bustub-whiteborder.svg" alt="BusTub Logo" height="200">
+# CMU 15-445/645: Database Systems Course
 
------------------
+This repository is a personal workspace for my journey through Carnegie Mellon University's course **15-445/645 - Database Systems**. The course focuses on the principles and practices of modern database systems, covering foundational topics such as storage, indexing, query optimization, concurrency control, and recovery.
 
-[![Build Status](https://github.com/cmu-db/bustub/actions/workflows/cmake.yml/badge.svg)](https://github.com/cmu-db/bustub/actions/workflows/cmake.yml)
+## About This Repository
 
-BusTub is a relational database management system built at [Carnegie Mellon University](https://db.cs.cmu.edu) for the [Introduction to Database Systems](https://15445.courses.cs.cmu.edu) (15-445/645) course. This system was developed for educational purposes and should not be used in production environments.
+- **Course Materials**: Includes notes, code snippets, and summaries of key lectures and readings.
+- **Assignments**: My implementations of various projects and assignments, such as buffer pool management, B+ trees, and transaction management.
+- **Additional Resources**: Links to supplementary readings, tools, and references that I've found helpful.
 
-BusTub supports basic SQL and comes with an interactive shell. You can get it running after finishing all the course projects.
+## Key Topics Covered
 
-<img src="logo/sql.png" alt="BusTub SQL" width="400">
+- **Storage and Indexing**: Understanding how data is physically stored and accessed efficiently.
+- **Query Processing and Optimization**: Learning the execution pipeline of database queries and how to optimize them.
+- **Concurrency Control**: Techniques for ensuring database consistency in multi-user environments.
+- **Recovery Mechanisms**: Implementing and understanding system robustness against failures.
 
-**WARNING: IF YOU ARE A STUDENT IN THE CLASS, DO NOT DIRECTLY FORK THIS REPO. DO NOT PUSH PROJECT SOLUTIONS PUBLICLY. THIS IS AN ACADEMIC INTEGRITY VIOLATION AND CAN LEAD TO GETTING YOUR DEGREE REVOKED, EVEN AFTER YOU GRADUATE.**
+## Tools and Languages
 
-We make the autograder for each assignment available to non-CMU students on Gradescope after their due date for CMU students. In exchange for making this available to the public, we ask that you do not make your project implementations public on Github or other source code repositories. Please read the course FAQ on how to use the autograder on Gradescope. Run `python3 gradescope_sign.py` to sign an agreement before submitting to the autograder.
+- **Programming Language**: Primarily C++ (used for projects).
+- **Database Systems**: Hands-on exploration with PostgreSQL and other systems.
+- **Utilities**: Git for version control and GDB for debugging.
 
-**WARNING: IF YOU ARE A STUDENT OUTSIDE CMU, DO NOT MAKE YOUR SOLUTION PUBLICLY AVAILABLE, AND DO SUBMIT YOUR OWN WORK. OTHERWISE, YOU WILL BE BANNED FROM USING THE AUTOGRADER.** Thank you for creating a fair learning environment.
+## Getting Started
 
-## Cloning this Repository
+To explore my work:
 
-The following instructions are adapted from the Github documentation on [duplicating a repository](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/duplicating-a-repository). The procedure below walks you through creating a private BusTub repository that you can use for development.
-
-1. Go [here](https://github.com/new) to create a new repository under your account. Pick a name (e.g. `bustub-private`) and select **Private** for the repository visibility level.
-2. On your development machine, create a bare clone of the public BusTub repository:
-   ```console
-   $ git clone --bare https://github.com/cmu-db/bustub.git bustub-public
+1. Clone this repository:
+   ```bash
+   https://github.com/AldonahZero/CMU-15-445-645.git
    ```
-3. Next, [mirror](https://git-scm.com/docs/git-push#Documentation/git-push.txt---mirror) the public BusTub repository to your own private BusTub repository. Suppose your GitHub name is `student` and your repository name is `bustub-private`. The procedure for mirroring the repository is then:
-   ```console
-   $ cd bustub-public
-   
-   # If you pull / push over HTTPS
-   $ git push https://github.com/student/bustub-private.git master
+2. Navigate to the relevant folder to find project-specific details.
 
-   # If you pull / push over SSH
-   $ git push git@github.com:student/bustub-private.git master
-   ```
-   This copies everything in the public BusTub repository to your own private repository. You can now delete your local clone of the public repository:
-   ```console
-   $ cd ..
-   $ rm -rf bustub-public
-   ```
-4. Clone your private repository to your development machine:
-   ```console
-   # If you pull / push over HTTPS
-   $ git clone https://github.com/student/bustub-private.git
+## Disclaimer
 
-   # If you pull / push over SSH
-   $ git clone git@github.com:student/bustub-private.git
-   ```
-5. Add the public BusTub repository as a second remote. This allows you to retrieve changes from the CMU-DB repository and merge them with your solution throughout the semester:
-   ```console
-   $ git remote add public https://github.com/cmu-db/bustub.git
-   ```
-   You can verify that the remote was added with the following command:
-   ```console
-   $ git remote -v
-   origin	https://github.com/student/bustub-private.git (fetch)
-   origin	https://github.com/student/bustub-private.git (push)
-   public	https://github.com/cmu-db/bustub.git (fetch)
-   public	https://github.com/cmu-db/bustub.git (push)
-   ```
-6. You can now pull in changes from the public BusTub repository as needed with:
-   ```console
-   $ git pull public master
-   ```
-7. **Disable GitHub Actions** from the project settings of your private repository, otherwise you may run out of GitHub Actions quota.
-   ```
-   Settings > Actions > General > Actions permissions > Disable actions.
-   ```
+This repository is for personal learning and educational purposes. It adheres to the academic integrity guidelines of CMU. Code and solutions provided here are my original work and are shared responsibly to promote learning.
 
-We suggest working on your projects in separate branches. If you do not understand how Git branches work, [learn how](https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging). If you fail to do this, you might lose all your work at some point in the semester, and nobody will be able to help you.
+---
+
+Feel free to follow this repository for updates and insights as I progress through the course. Suggestions and feedback are always welcome!
 
 ## Build
 
