@@ -28,62 +28,26 @@ enum class AccessType { Unknown = 0, Lookup, Scan, Index };
 
 class LRUKNode {
 public:
- // 构造函数：初始化 k 值和帧 ID，默认不可淘汰
- LRUKNode(size_t k, frame_id_t fid) : k_(k), fid_(fid), is_evictable_(false) {}
+ explicit LRUKNode(size_t k, frame_id_t fid) : k_(k), fid_(fid), is_evictable_(false) {}
 
- // 添加时间戳：记录访问历史，并确保最多保留 K 个时间戳
- void AddTimestamp(size_t timestamp) {
-  history_.push_back(timestamp);
-  if (history_.size() > k_) {
-   history_.pop_front();  // 移除最早的时间戳
-  }
- }
+ /** 获取访问历史 */
+ auto &GetHistory() { return history_; }
 
- // 获取当前页面的 k 距离
- size_t GetKDistance(size_t current_timestamp) const {
-  if (history_.size() < k_) {
-   return std::numeric_limits<size_t>::max();  // 如果不足 K 次访问，返回无穷大
-  }
-  return current_timestamp - history_.front();
- }
-
- // 判断页面是否可被淘汰
- bool IsEvictable() const { return is_evictable_; }
-
- // 设置页面是否可被淘汰
+ /** 设置是否可淘汰 */
  void SetEvictable(bool evictable) { is_evictable_ = evictable; }
 
- // 获取页面的最早时间戳
- size_t GetTimestamp() const {
-  if (history_.empty()) {
-   return std::numeric_limits<size_t>::max();  // 如果没有历史记录，返回无穷大
-  }
-  return history_.front();
- }
-
- // 获取访问历史记录
- const std::list<size_t> &GetHistory() const { return history_; }
-
- // 设置历史记录（可用于单元测试或特殊用途）
- void SetHistory(const std::list<size_t> &history) { history_ = history; }
-
- // 获取帧 ID
- frame_id_t GetFrameId() const { return fid_; }
-
- // 设置帧 ID（通常不需要，但可留作扩展）
- void SetFrameId(frame_id_t fid) { fid_ = fid; }
-
- // 获取 k 值
- size_t GetK() const { return k_; }
-
- // 设置 k 值（可用于动态调整算法）
- void SetK(size_t k) { k_ = k; }
+ /** 获取是否可淘汰 */
+ auto IsEvictable() const -> bool { return is_evictable_; }
 
 private:
- std::list<size_t> history_;  // 访问时间戳的历史记录
- size_t k_;                   // K 值，用于确定保留多少次访问记录
- frame_id_t fid_;             // 帧 ID
- bool is_evictable_;          // 是否可被淘汰
+ /** 保存最近 K 次访问的时间戳（按顺序排列） */
+ std::list<size_t> history_;
+ /** 最大 K 值 */
+ size_t k_;
+ /** 帧 ID */
+ frame_id_t fid_;
+ /** 是否可被淘汰 */
+ bool is_evictable_;
 };
 
 /**

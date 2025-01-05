@@ -38,15 +38,15 @@ auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
     }
 
     // 计算 k 距离：如果访问历史不足 k 次，则设置为无穷大
-    size_t k_distance = (node.GetHisotry().size() < k_)
+    size_t k_distance = (node.GetHistory().size() < k_)
                             ? std::numeric_limits<size_t>::max()
-                            : current_timestamp_ - node.GetHisotry().front();
+                            : current_timestamp_ - node.GetHistory().front();
 
     // 更新候选页面：选择 k 距离最大或者访问时间最早的页面
     if (k_distance > max_k_distance ||
-       (k_distance == max_k_distance && node.GetHisotry().front() < min_timestamp)) {
+       (k_distance == max_k_distance && node.GetHistory().front() < min_timestamp)) {
       max_k_distance = k_distance;
-      min_timestamp = node.GetHisotry().front();
+      min_timestamp = node.GetHistory().front();
       candidate = frame_id;
        }
   }
@@ -60,8 +60,35 @@ auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
   return candidate;
 }
 
-// 记录页面访问：将当前时间戳加入到页面的访问历史中
-void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
+void LRUKReplacer::RecordAccess(frame_id_t frame_id, AccessType access_type) {
+    std::lock_guard<std::mutex> lock(latch_); // 确保线程安全
+
+    // 检查帧 ID 的合法性
+    if (frame_id >= replacer_size_) {
+        throw std::out_of_range("Frame ID 超出范围。");
+    }
+
+    current_timestamp_++; // 增加全局时间戳
+
+    // 如果页面不存在，则初始化节点
+    if (node_store_.find(frame_id) == node_store_.end()) {
+        node_store_.emplace(frame_id, LRUKNode(k_, frame_id));
+    }
+
+    // 获取节点并操作访问历史
+    auto &node = node_store_[frame_id];
+    auto &history = node.GetHistory();
+    history.push_back(current_timestamp_); // 添加当前时间戳
+
+    // 如果队列长度超过 k，移除最早的时间戳
+    if (history.size() > k_) {
+        history.pop_front();
+    }
+}
+
+
+// 设置页面是否可被淘汰
+void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
   std::lock_guard<std::mutex> lock(latch_); // 确保线程安全
 
   // 检查帧 ID 的合法性
@@ -69,29 +96,51 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
     throw std::out_of_range("Frame ID 超出范围。");
   }
 
-  current_timestamp_++; // 增加全局时间戳
-
-  // 如果页面不存在，则初始化节点
+  // 如果页面不存在，直接返回
   if (node_store_.find(frame_id) == node_store_.end()) {
-    node_store_[frame_id] = LRUKNode();
-    node_store_[frame_id].SetK(k_);
-    node_store_[frame_id].SetFrameId(frame_id);
+    return;
   }
 
-  // 添加当前时间戳到访问历史队列
   auto &node = node_store_[frame_id];
-  node.GetHisotry().push_back(current_timestamp_);
+  bool was_evictable = node.IsEvictable();
+  node.SetEvictable(set_evictable);
 
-  // 如果队列长度超过 k，移除最早的时间戳
-  if (node.GetHisotry().size() > k_) {
-    node.GetHisotry().pop_front();
+  // 根据状态变化更新可淘汰页面的计数
+  if (!was_evictable && set_evictable) {
+    curr_size_++;
+  } else if (was_evictable && !set_evictable) {
+    curr_size_--;
   }
 }
 
-void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
 
-void LRUKReplacer::Remove(frame_id_t frame_id) {}
+void LRUKReplacer::Remove(frame_id_t frame_id) {
+  std::lock_guard<std::mutex> lock(latch_); // 确保线程安全
 
-auto LRUKReplacer::Size() -> size_t { return 0; }
+  // 检查帧 ID 的合法性
+  if (frame_id >= replacer_size_) {
+    throw std::out_of_range("Frame ID 超出范围。");
+  }
+
+  // 如果页面不存在，直接返回
+  if (node_store_.find(frame_id) == node_store_.end()) {
+    return;
+  }
+
+  auto &node = node_store_[frame_id];
+  if (!node.IsEvictable()) {
+    throw std::logic_error("试图移除不可淘汰的页面。");
+  }
+
+  // 更新可淘汰页面的计数并移除页面记录
+  curr_size_--;
+  node_store_.erase(frame_id);
+}
+
+// 返回当前可淘汰页面的数量
+auto LRUKReplacer::Size() -> size_t {
+  std::lock_guard<std::mutex> lock(latch_); // 确保线程安全
+  return curr_size_;
+}
 
 }  // namespace bustub
