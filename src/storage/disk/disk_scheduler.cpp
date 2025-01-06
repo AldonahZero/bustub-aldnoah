@@ -15,7 +15,6 @@
 #include "storage/disk/disk_manager.h"
 
 namespace bustub {
-
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
   // TODO(P1): remove this line after you have implemented the disk scheduler API
   throw NotImplementedException(
@@ -34,8 +33,35 @@ DiskScheduler::~DiskScheduler() {
   }
 }
 
-void DiskScheduler::Schedule(DiskRequest r) {}
+// Schedule 方法：调度磁盘请求
+void DiskScheduler::Schedule(DiskRequest r) {
+  // 将 DiskRequest 包装为 std::optional 并放入队列
+  request_queue_.Put(std::make_optional<DiskRequest>(std::move(r)));
+}
+// StartWorkerThread 方法：后台线程处理磁盘请求
+void DiskScheduler::StartWorkerThread() {
+  while (true) {
+    // 从队列中获取请求，阻塞等待新请求
+    auto request_opt = request_queue_.Get();
 
-void DiskScheduler::StartWorkerThread() {}
+    // 如果接收到 std::nullopt，退出线程
+    if (!request_opt.has_value()) {
+      break;
+    }
 
-}  // namespace bustub
+    // 使用 std::move 移动构造 DiskRequest
+    DiskRequest request = std::move(request_opt.value());
+
+    // 根据请求类型调用 DiskManager 的相应方法
+    if (request.is_write_) {
+      disk_manager_->WritePage(request.page_id_, request.data_);
+    } else {
+      disk_manager_->ReadPage(request.page_id_, request.data_);
+    }
+
+    // 设置 promise 的值为 true，通知请求提交者请求已完成
+    request.callback_.set_value(true);
+  }
+}
+
+}// namespace bustub

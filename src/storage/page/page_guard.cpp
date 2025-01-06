@@ -29,7 +29,8 @@ namespace bustub {
 ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
                              std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::mutex> bpm_latch)
     : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), bpm_latch_(std::move(bpm_latch)) {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  is_valid_ = true; // 标记为有效
+  frame_->pin_count_.fetch_add(1); // 增加 pin count，防止页面被淘汰
 }
 
 /**
@@ -47,7 +48,9 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
  *
  * @param that The other page guard.
  */
-ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {}
+ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
+  *this = std::move(that); // 移动构造函数
+}
 
 /**
  * @brief The move assignment operator for `ReadPageGuard`.
@@ -66,7 +69,22 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {}
  * @param that The other page guard.
  * @return ReadPageGuard& The newly valid `ReadPageGuard`.
  */
-auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & { return *this; }
+auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
+  if (this != &that) {
+    Drop(); // 释放当前对象的资源
+
+    // 接管新对象的资源
+    page_id_ = that.page_id_;
+    frame_ = std::move(that.frame_);
+    replacer_ = std::move(that.replacer_);
+    bpm_latch_ = std::move(that.bpm_latch_);
+    is_valid_ = that.is_valid_;
+
+    // 标记被接管的对象无效
+    that.is_valid_ = false;
+  }
+  return *this;
+}
 
 /**
  * @brief Gets the page ID of the page this guard is protecting.
@@ -103,10 +121,23 @@ auto ReadPageGuard::IsDirty() const -> bool {
  *
  * TODO(P1): Add implementation.
  */
-void ReadPageGuard::Drop() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void ReadPageGuard::Drop() {
+  if (is_valid_) {
+    std::lock_guard<std::mutex> lock(*bpm_latch_); // 确保线程安全
+
+    // 减少 pin count
+    if (frame_->pin_count_.fetch_sub(1) == 1) {
+      replacer_->SetEvictable(page_id_, true); // 标记为可被淘汰
+    }
+
+    is_valid_ = false; // 标记为无效
+  }
+}
 
 /** @brief The destructor for `ReadPageGuard`. This destructor simply calls `Drop()`. */
-ReadPageGuard::~ReadPageGuard() { Drop(); }
+ReadPageGuard::~ReadPageGuard() {
+  Drop();
+}
 
 /**********************************************************************************************************************/
 /**********************************************************************************************************************/
@@ -127,7 +158,8 @@ ReadPageGuard::~ReadPageGuard() { Drop(); }
 WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
                                std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::mutex> bpm_latch)
     : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), bpm_latch_(std::move(bpm_latch)) {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  is_valid_ = true; // 标记为有效
+  frame_->pin_count_.fetch_add(1); // 增加 pin count，防止页面被淘汰
 }
 
 /**
@@ -145,7 +177,9 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
  *
  * @param that The other page guard.
  */
-WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {}
+WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
+  *this = std::move(that); // 调用 move assignment operator
+}
 
 /**
  * @brief The move assignment operator for `WritePageGuard`.
@@ -164,7 +198,22 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {}
  * @param that The other page guard.
  * @return WritePageGuard& The newly valid `WritePageGuard`.
  */
-auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & { return *this; }
+auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
+  if (this != &that) {
+    Drop(); // 释放当前对象的资源
+
+    // 接管新对象的资源
+    page_id_ = that.page_id_;
+    frame_ = std::move(that.frame_);
+    replacer_ = std::move(that.replacer_);
+    bpm_latch_ = std::move(that.bpm_latch_);
+    is_valid_ = that.is_valid_;
+
+    // 标记被接管的对象无效
+    that.is_valid_ = false;
+  }
+  return *this;
+}
 
 /**
  * @brief Gets the page ID of the page this guard is protecting.
@@ -209,9 +258,25 @@ auto WritePageGuard::IsDirty() const -> bool {
  *
  * TODO(P1): Add implementation.
  */
-void WritePageGuard::Drop() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void WritePageGuard::Drop() {
+  if (is_valid_) {
+    std::lock_guard<std::mutex> lock(*bpm_latch_); // 确保线程安全
+
+    // 设置页面为脏页
+    frame_->is_dirty_ = true;
+
+    // 减少 pin count
+    if (frame_->pin_count_.fetch_sub(1) == 1) {
+      replacer_->SetEvictable(page_id_, true); // 标记为可被淘汰
+    }
+
+    is_valid_ = false; // 标记为无效
+  }
+}
 
 /** @brief The destructor for `WritePageGuard`. This destructor simply calls `Drop()`. */
-WritePageGuard::~WritePageGuard() { Drop(); }
+WritePageGuard::~WritePageGuard() {
+  Drop();
+}
 
 }  // namespace bustub
