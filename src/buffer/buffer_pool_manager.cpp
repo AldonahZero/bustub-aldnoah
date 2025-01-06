@@ -122,7 +122,47 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::NewPage() -> page_id_t {
+  std::scoped_lock lock(*bpm_latch_); // 加锁保护共享数据
+
+  frame_id_t frame_id;
+
+  // 如果有空闲帧，直接分配
+  if (!free_frames_.empty()) {
+    frame_id = free_frames_.front();
+    free_frames_.pop_front();
+  } else {
+    // 没有空闲帧时，使用替换器寻找可淘汰的帧
+    auto victim_opt = replacer_->Evict();
+    if (!victim_opt.has_value()) {
+      throw std::runtime_error("没有可用的帧来分配新页面。");
+    }
+    frame_id = victim_opt.value();
+
+    auto frame = frames_[frame_id];
+    if (frame->is_dirty_) {
+      // 如果帧为脏页，将数据写回磁盘
+      disk_scheduler_->Schedule(DiskRequest{true, frame->GetDataMut(), frame->frame_id_, {}});
+    }
+
+    // 移除旧页面的映射关系
+    page_table_.erase(frame->frame_id_);
+    frame->Reset();
+  }
+
+  // 分配新页面
+  page_id_t new_page_id = next_page_id_.fetch_add(1);
+  auto frame = frames_[frame_id];
+  frame->pin_count_ = 1; // 引用计数为 1
+  frame->is_dirty_ = false;
+
+  // 更新 page table 和替换器
+  page_table_[new_page_id] = frame_id;
+  replacer_->RecordAccess(frame_id);
+  replacer_->SetEvictable(frame_id, false);
+
+  return new_page_id;
+}
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.
@@ -150,7 +190,36 @@ auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add im
  * @param page_id The page ID of the page we want to delete.
  * @return `false` if the page exists but could not be deleted, `true` if the page didn't exist or deletion succeeded.
  */
-auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
+  std::scoped_lock lock(*bpm_latch_);
+
+  // 检查页面是否在内存中
+  auto it = page_table_.find(page_id);
+  if (it == page_table_.end()) {
+    return false; // 页面不存在
+  }
+
+  frame_id_t frame_id = it->second;
+  auto frame = frames_[frame_id];
+
+  if (frame->pin_count_ > 0) {
+    return false; // 页面仍在使用，无法删除
+  }
+
+  if (frame->is_dirty_) {
+    // 写回脏页
+    disk_scheduler_->Schedule(DiskRequest{true, frame->GetDataMut(), page_id, {}});
+  }
+
+  // 从 page table 移除，并重置帧
+  page_table_.erase(page_id);
+  replacer_->Remove(frame_id);
+  frame->Reset();
+  free_frames_.push_back(frame_id);
+
+  return true;
+}
+
 
 /**
  * @brief Acquires an optional write-locked guard over a page of data. The user can specify an `AccessType` if needed.
@@ -191,9 +260,51 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("T
  * @return std::optional<WritePageGuard> An optional latch guard where if there are no more free frames (out of memory)
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
-auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type)
+    -> std::optional<WritePageGuard> {
+  std::scoped_lock lock(*bpm_latch_);
+
+  frame_id_t frame_id;
+  auto it = page_table_.find(page_id);
+
+  if (it == page_table_.end()) {
+    // 页面不在内存，需要加载
+    if (free_frames_.empty()) {
+      auto victim_opt = replacer_->Evict();
+      if (!victim_opt.has_value()) {
+        return std::nullopt; // 无法加载页面
+      }
+      frame_id = victim_opt.value();
+
+      auto frame = frames_[frame_id];
+      if (frame->is_dirty_) {
+        disk_scheduler_->Schedule(DiskRequest{true, frame->GetDataMut(), frame->frame_id_, {}});
+      }
+
+      page_table_.erase(frame->frame_id_);
+      frame->Reset();
+    } else {
+      // 使用空闲帧
+      frame_id = free_frames_.front();
+      free_frames_.pop_front();
+    }
+
+    // 加载页面到内存
+    auto frame = frames_[frame_id];
+    disk_scheduler_->Schedule(DiskRequest{false, frame->GetDataMut(), page_id, {}});
+    page_table_[page_id] = frame_id;
+  } else {
+    frame_id = it->second;
+  }
+
+  // 更新引用计数和替换器状态
+  auto frame = frames_[frame_id];
+  frame->pin_count_++;
+  replacer_->SetEvictable(frame_id, false);
+
+  return WritePageGuard(page_id, frame, replacer_, bpm_latch_);
 }
+
 
 /**
  * @brief Acquires an optional read-locked guard over a page of data. The user can specify an `AccessType` if needed.
@@ -219,9 +330,51 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
  * @return std::optional<ReadPageGuard> An optional latch guard where if there are no more free frames (out of memory)
  * returns `std::nullopt`, otherwise returns a `ReadPageGuard` ensuring shared and read-only access to a page's data.
  */
-auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type)
+    -> std::optional<ReadPageGuard> {
+  std::scoped_lock lock(*bpm_latch_);
+
+  frame_id_t frame_id;
+  auto it = page_table_.find(page_id);
+
+  if (it == page_table_.end()) {
+    // 页面不在内存，需要加载
+    if (free_frames_.empty()) {
+      auto victim_opt = replacer_->Evict();
+      if (!victim_opt.has_value()) {
+        return std::nullopt; // 无法加载页面
+      }
+      frame_id = victim_opt.value();
+
+      auto frame = frames_[frame_id];
+      if (frame->is_dirty_) {
+        disk_scheduler_->Schedule(DiskRequest{true, frame->GetDataMut(), frame->frame_id_, {}});
+      }
+
+      page_table_.erase(frame->frame_id_);
+      frame->Reset();
+    } else {
+      // 使用空闲帧
+      frame_id = free_frames_.front();
+      free_frames_.pop_front();
+    }
+
+    // 加载页面到内存
+    auto frame = frames_[frame_id];
+    disk_scheduler_->Schedule(DiskRequest{false, frame->GetDataMut(), page_id, {}});
+    page_table_[page_id] = frame_id;
+  } else {
+    frame_id = it->second;
+  }
+
+  // 更新引用计数和替换器状态
+  auto frame = frames_[frame_id];
+  frame->pin_count_++;
+  replacer_->SetEvictable(frame_id, false);
+
+  return ReadPageGuard(page_id, frame, replacer_, bpm_latch_);
 }
+
 
 /**
  * @brief A wrapper around `CheckedWritePage` that unwraps the inner value if it exists.
@@ -289,7 +442,25 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
  */
-auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
+  std::scoped_lock lock(*bpm_latch_);
+
+  auto it = page_table_.find(page_id);
+  if (it == page_table_.end()) {
+    return false; // 页面不存在
+  }
+
+  frame_id_t frame_id = it->second;
+  auto frame = frames_[frame_id];
+
+  if (frame->is_dirty_) {
+    disk_scheduler_->Schedule(DiskRequest{true, frame->GetDataMut(), page_id, {}});
+    frame->is_dirty_ = false;
+  }
+
+  return true;
+}
+
 
 /**
  * @brief Flushes all page data that is in memory to disk.
@@ -301,7 +472,13 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TO
  *
  * TODO(P1): Add implementation
  */
-void BufferPoolManager::FlushAllPages() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void BufferPoolManager::FlushAllPages() {
+  std::scoped_lock lock(*bpm_latch_);
+
+  for (const auto &[page_id, frame_id] : page_table_) {
+    FlushPage(page_id);
+  }
+}
 
 /**
  * @brief Retrieves the pin count of a page. If the page does not exist in memory, return `std::nullopt`.
@@ -328,7 +505,14 @@ void BufferPoolManager::FlushAllPages() { UNIMPLEMENTED("TODO(P1): Add implement
  * @return std::optional<size_t> The pin count if the page exists, otherwise `std::nullopt`.
  */
 auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> {
-  UNIMPLEMENTED("TODO(P1): Add implementation.");
+  std::lock_guard<std::mutex> lock(*bpm_latch_);
+
+  if (page_table_.find(page_id) == page_table_.end()) {
+    return std::nullopt; // 页面不存在
+  }
+
+  frame_id_t frame_id = page_table_[page_id];
+  return frames_[frame_id]->pin_count_;
 }
 
 }  // namespace bustub
